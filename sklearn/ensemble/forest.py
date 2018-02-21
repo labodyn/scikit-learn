@@ -75,17 +75,21 @@ __all__ = ["RandomForestClassifier",
 MAX_INT = np.iinfo(np.int32).max
 
 
-def _generate_sample_indices(random_state, n_samples):
+def _generate_sample_indices(random_state, n_samples,
+                             bootstrap_subsample_fraction):
     """Private function used to _parallel_build_trees function."""
     random_instance = check_random_state(random_state)
-    sample_indices = random_instance.randint(0, n_samples, n_samples)
+    n_draw = int(bootstrap_subsample_fraction * n_samples)
+    sample_indices = random_instance.randint(0, n_samples, n_draw)
 
     return sample_indices
 
 
-def _generate_unsampled_indices(random_state, n_samples):
+def _generate_unsampled_indices(random_state, n_samples,
+                                bootstrap_subsample_fraction):
     """Private function used to forest._set_oob_score function."""
-    sample_indices = _generate_sample_indices(random_state, n_samples)
+    sample_indices = _generate_sample_indices(random_state, n_samples,
+                                              bootstrap_subsample_fraction)
     sample_counts = np.bincount(sample_indices, minlength=n_samples)
     unsampled_mask = sample_counts == 0
     indices_range = np.arange(n_samples)
@@ -100,6 +104,10 @@ def _parallel_build_trees(tree, forest, X, y, sample_weight, tree_idx, n_trees,
     if verbose > 1:
         print("building tree %d of %d" % (tree_idx + 1, n_trees))
 
+    if not forest.bootstrap and forest.bootstrap_subsample_fraction < 1.:
+        raise ValueError("bootstrap_fraction < 1 only available "
+                         "if bootstrap=True")
+
     if forest.bootstrap:
         n_samples = X.shape[0]
         if sample_weight is None:
@@ -107,7 +115,8 @@ def _parallel_build_trees(tree, forest, X, y, sample_weight, tree_idx, n_trees,
         else:
             curr_sample_weight = sample_weight.copy()
 
-        indices = _generate_sample_indices(tree.random_state, n_samples)
+        indices = _generate_sample_indices(tree.random_state, n_samples,
+                                           forest.bootstrap_subsample_fraction)
         sample_counts = np.bincount(indices, minlength=n_samples)
         curr_sample_weight *= sample_counts
 
@@ -138,6 +147,7 @@ class BaseForest(six.with_metaclass(ABCMeta, BaseEnsemble)):
                  n_estimators=10,
                  estimator_params=tuple(),
                  bootstrap=False,
+                 bootstrap_subsample_fraction=1,
                  oob_score=False,
                  n_jobs=1,
                  random_state=None,
@@ -150,6 +160,7 @@ class BaseForest(six.with_metaclass(ABCMeta, BaseEnsemble)):
             estimator_params=estimator_params)
 
         self.bootstrap = bootstrap
+        self.bootstrap_subsample_fraction = bootstrap_subsample_fraction
         self.oob_score = oob_score
         self.n_jobs = n_jobs
         self.random_state = random_state
@@ -402,6 +413,7 @@ class ForestClassifier(six.with_metaclass(ABCMeta, BaseForest,
                  n_estimators=10,
                  estimator_params=tuple(),
                  bootstrap=False,
+                 bootstrap_subsample_fraction=1,
                  oob_score=False,
                  n_jobs=1,
                  random_state=None,
@@ -414,6 +426,7 @@ class ForestClassifier(six.with_metaclass(ABCMeta, BaseForest,
             n_estimators=n_estimators,
             estimator_params=estimator_params,
             bootstrap=bootstrap,
+            bootstrap_subsample_fraction=bootstrap_subsample_fraction,
             oob_score=oob_score,
             n_jobs=n_jobs,
             random_state=random_state,
@@ -437,7 +450,8 @@ class ForestClassifier(six.with_metaclass(ABCMeta, BaseForest,
 
         for estimator in self.estimators_:
             unsampled_indices = _generate_unsampled_indices(
-                estimator.random_state, n_samples)
+                estimator.random_state, n_samples,
+                self.bootstrap_subsample_fraction)
             p_estimator = estimator.predict_proba(X[unsampled_indices, :],
                                                   check_input=False)
 
@@ -641,6 +655,7 @@ class ForestRegressor(six.with_metaclass(ABCMeta, BaseForest, RegressorMixin)):
                  n_estimators=10,
                  estimator_params=tuple(),
                  bootstrap=False,
+                 bootstrap_subsample_fraction=1,
                  oob_score=False,
                  n_jobs=1,
                  random_state=None,
@@ -651,6 +666,7 @@ class ForestRegressor(six.with_metaclass(ABCMeta, BaseForest, RegressorMixin)):
             n_estimators=n_estimators,
             estimator_params=estimator_params,
             bootstrap=bootstrap,
+            bootstrap_subsample_fraction=bootstrap_subsample_fraction,
             oob_score=oob_score,
             n_jobs=n_jobs,
             random_state=random_state,
@@ -709,7 +725,8 @@ class ForestRegressor(six.with_metaclass(ABCMeta, BaseForest, RegressorMixin)):
 
         for estimator in self.estimators_:
             unsampled_indices = _generate_unsampled_indices(
-                estimator.random_state, n_samples)
+                estimator.random_state, n_samples,
+                self.bootstrap_subsample_fraction)
             p_estimator = estimator.predict(
                 X[unsampled_indices, :], check_input=False)
 
@@ -845,6 +862,10 @@ class RandomForestClassifier(ForestClassifier):
 
     bootstrap : boolean, optional (default=True)
         Whether bootstrap samples are used when building trees.
+
+    bootstrap_subsample_fraction : float, optional (default=1)
+        What fraction of the number of samples must be used during
+        bootstrapping.
 
     oob_score : bool (default=False)
         Whether to use out-of-bag samples to estimate
@@ -982,6 +1003,7 @@ class RandomForestClassifier(ForestClassifier):
                  min_impurity_decrease=0.,
                  min_impurity_split=None,
                  bootstrap=True,
+                 bootstrap_subsample_fraction=1,
                  oob_score=False,
                  n_jobs=1,
                  random_state=None,
@@ -997,6 +1019,7 @@ class RandomForestClassifier(ForestClassifier):
                               "min_impurity_decrease", "min_impurity_split",
                               "random_state"),
             bootstrap=bootstrap,
+            bootstrap_subsample_fraction=bootstrap_subsample_fraction,
             oob_score=oob_score,
             n_jobs=n_jobs,
             random_state=random_state,
@@ -1124,6 +1147,10 @@ class RandomForestRegressor(ForestRegressor):
     bootstrap : boolean, optional (default=True)
         Whether bootstrap samples are used when building trees.
 
+    bootstrap_subsample_fraction : float, optional (default=1)
+        What fraction of the number of samples must be used during
+        bootstrapping.
+
     oob_score : bool, optional (default=False)
         whether to use out-of-bag samples to estimate
         the R^2 on unseen data.
@@ -1222,6 +1249,7 @@ class RandomForestRegressor(ForestRegressor):
                  min_impurity_decrease=0.,
                  min_impurity_split=None,
                  bootstrap=True,
+                 bootstrap_subsample_fraction=1,
                  oob_score=False,
                  n_jobs=1,
                  random_state=None,
@@ -1236,6 +1264,7 @@ class RandomForestRegressor(ForestRegressor):
                               "min_impurity_decrease", "min_impurity_split",
                               "random_state"),
             bootstrap=bootstrap,
+            bootstrap_subsample_fraction=bootstrap_subsample_fraction,
             oob_score=oob_score,
             n_jobs=n_jobs,
             random_state=random_state,
@@ -1354,6 +1383,10 @@ class ExtraTreesClassifier(ForestClassifier):
 
     bootstrap : boolean, optional (default=False)
         Whether bootstrap samples are used when building trees.
+
+    bootstrap_subsample_fraction : float, optional (default=1)
+        What fraction of the number of samples must be used during
+        bootstrapping.
 
     oob_score : bool, optional (default=False)
         Whether to use out-of-bag samples to estimate
@@ -1604,6 +1637,10 @@ class ExtraTreesRegressor(ForestRegressor):
     bootstrap : boolean, optional (default=False)
         Whether bootstrap samples are used when building trees.
 
+    bootstrap_subsample_fraction : float, optional (default=1)
+        What fraction of the number of samples must be used during
+        bootstrapping.
+
     oob_score : bool, optional (default=False)
         Whether to use out-of-bag samples to estimate the R^2 on unseen data.
 
@@ -1676,6 +1713,7 @@ class ExtraTreesRegressor(ForestRegressor):
                  min_impurity_decrease=0.,
                  min_impurity_split=None,
                  bootstrap=False,
+                 bootstrap_subsample_fraction=1,
                  oob_score=False,
                  n_jobs=1,
                  random_state=None,
@@ -1690,6 +1728,7 @@ class ExtraTreesRegressor(ForestRegressor):
                               "min_impurity_decrease", "min_impurity_split",
                               "random_state"),
             bootstrap=bootstrap,
+            bootstrap_subsample_fraction=bootstrap_subsample_fraction,
             oob_score=oob_score,
             n_jobs=n_jobs,
             random_state=random_state,
@@ -1794,6 +1833,10 @@ class RandomTreesEmbedding(BaseForest):
     bootstrap : boolean, optional (default=True)
         Whether bootstrap samples are used when building trees.
 
+    bootstrap_subsample_fraction : float, optional (default=1)
+        What fraction of the number of samples must be used during
+        bootstrapping.
+
     sparse_output : bool, optional (default=True)
         Whether or not to return a sparse CSR matrix, as default behavior,
         or to return a dense array compatible with dense pipeline operators.
@@ -1854,6 +1897,7 @@ class RandomTreesEmbedding(BaseForest):
                               "min_impurity_decrease", "min_impurity_split",
                               "random_state"),
             bootstrap=False,
+            bootstrap_subsample_fraction=1,
             oob_score=False,
             n_jobs=n_jobs,
             random_state=random_state,
